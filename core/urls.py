@@ -19,5 +19,7 @@ from django.urls import path, include
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('__debug__/', include('debug_toolbar.urls')),
+    path('django-rq/', include('django_rq.urls')),
+    path('api/', include('auth_app.api.urls')),
+    path('api/', include('videoflix_app.api.urls')),
 ]
