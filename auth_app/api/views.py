@@ -1,5 +1,5 @@
 from rest_framework import status
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -9,8 +9,9 @@ from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.contrib.auth import get_user_model
 from django.utils.encoding import force_bytes
 from django.core.mail import send_mail
+from auth_app.api.authentication import CookieJWTAuthentication
 from core import settings
-from .serializers import CustomTokenObtainPairSerializer, RegistrationSerializer
+from .serializers import CustomTokenObtainPairSerializer, RegistrationSerializer, ResetPasswordSerializer, ConfirmPasswordResetSerializer
 
 
 User = get_user_model()
@@ -160,12 +161,12 @@ class CookieTokenRefreshView(TokenRefreshView):
         return response
     
     
-    
-
 class LogoutView(APIView):
     """
     View for logging out a user by clearing authentication cookies.
     """
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [CookieJWTAuthentication]
 
     def post(self, request):
         """
@@ -181,6 +182,65 @@ class LogoutView(APIView):
 
         return response
 
+
+class ResetPasswordView(APIView):
+    permission_classes = [AllowAny]
+    serializer_class = ResetPasswordSerializer
+    def post(self, request):
+        """ Handle password reset requests by validating the provided email, generating a password reset link if the user exists, and returning an appropriate response.
+
+        Args:
+            request (request): The HTTP request object containing the email for password reset.
+        Returns:
+            object: A response indicating success or failure of the password reset request process.
+        """
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid(raise_exception=True):
+            email = serializer.validated_data['email']
+            user = User.objects.get(email=email)
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            reset_link = f"http://127.0.0.1:8000/password_confirm/{uid}/{token}/"
+            return Response({
+                "detail": "An email has been sent to reset your password.",
+                "reset_link": reset_link
+            }, status=status.HTTP_200_OK)
+        else:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
         
 
+class PasswordResetConfirmView(APIView):
+    permission_classes = [AllowAny]
+    serializer_class = ConfirmPasswordResetSerializer
+    def post(self, request, uidb64, token):
+        """ Handle password reset confirmation by validating the provided UID and token, allowing the user to set a new password if valid, and returning an appropriate response.
 
+        Args:
+            request (request): The HTTP request object containing the new password.
+            uidb64 (UID): The base64-encoded UID of the user resetting their password.
+            token (string): The token used to validate the password reset request.
+        Returns:
+            object: A response indicating success or failure of the password reset confirmation process.
+        """
+        try:
+            uid = urlsafe_base64_decode(uidb64).decode()
+            user = User.objects.get(pk=uid)
+            if default_token_generator.check_token(user, token):
+                serializer = self.serializer_class(data=request.data)
+                if serializer.is_valid(raise_exception=True):
+                    new_password = serializer.validated_data['new_password']
+                    user.set_password(new_password)
+                    user.save()
+                    return Response({"detail": "Your Password has been successfully reset."}, status=status.HTTP_200_OK)
+                else:
+                    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                return Response({"error": "The password reset link is invalid or has expired."}, status=status.HTTP_400_BAD_REQUEST)
+        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+            return Response({"error": "Invalid password reset data."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        
+        
+        
+        

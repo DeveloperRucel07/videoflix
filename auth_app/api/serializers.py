@@ -61,18 +61,7 @@ class RegistrationSerializer(serializers.ModelSerializer):
         user.set_password(validated_data['password'])
         user.is_active= False
         user.save()
-        return user
-
-
-class UserSerializer(serializers.ModelSerializer):
-    """
-    User Serializer.
-    Used to serialize user data.
-    """
-    class Meta:
-        model = User
-        fields = ['id', 'email']
-        
+        return user   
     
     
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
@@ -119,6 +108,52 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         attrs['username'] = user.username
         data = super().validate(attrs)
         return data
+    
+class ResetPasswordSerializer(serializers.Serializer):
+    """
+    Serializer for handling password reset requests.
+    Validates the email and generates a password reset link if the user exists.
+    """
+    email = serializers.EmailField()
+    
+    def validate_email(self, value):
+        """ Validate that the email exists in the system.
+            Args:
+                value (str): The email address to validate.
+            Raises:
+                serializers.ValidationError: If a user with the provided email does not exist.
+            Returns:
+                str: The validated email address.
+        """
+        if not User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("User with this email does not exist.")
+        return value
+    
+    
+class ConfirmPasswordResetSerializer(serializers.Serializer):
+    """
+    Serializer for confirming password reset.
+    Validates the new password and its confirmation.
+    """
+    new_password = serializers.CharField(write_only=True)
+    confirm_password = serializers.CharField(write_only=True)
+    
+    def validate(self, attrs):
+        """ Validate that the new password and confirm password match.
+            Args:
+                attrs (dict): The data containing new_password and confirm_password.
+            Raises:
+                serializers.ValidationError: If the new password and confirm password do not match.
+            Returns:
+                dict: The validated data if the passwords match.
+        """
+        new_password = attrs.get('new_password')
+        confirm_password = attrs.get('confirm_password')
+
+        if new_password != confirm_password:
+            raise serializers.ValidationError("The new password and confirm password do not match.")
+        
+        return attrs
     
         
         
