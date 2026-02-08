@@ -126,7 +126,7 @@ class ResetPasswordSerializer(serializers.Serializer):
                 str: The validated email address.
         """
         if not User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("User with this email does not exist.")
+            raise serializers.ValidationError({"detail": "Please enter a valid email address."})
         return value
     
     

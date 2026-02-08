@@ -10,6 +10,8 @@ from django.contrib.auth import get_user_model
 from django.utils.encoding import force_bytes
 from django.core.mail import send_mail
 from auth_app.api.authentication import CookieJWTAuthentication
+from auth_app.utils.activate_email import send_activation_email
+from auth_app.utils.password_reset_email import send_password_reset_email
 from core import settings
 from .serializers import CustomTokenObtainPairSerializer, RegistrationSerializer, ResetPasswordSerializer, ConfirmPasswordResetSerializer
 
@@ -31,14 +33,8 @@ class RegistrationView(APIView):
             user = serializer.create(serializer.validated_data)
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = default_token_generator.make_token(user)
-            activation_link = f"127.0.0.1:8000/activate/{uid}/{token}"
-            print(f"Activation link: {activation_link}")
-            send_mail(
-                "Activate your account",
-                f"Click here to activate: {activation_link}",
-                "your@email.com",
-                [user.email],
-            )
+            # activation_link = f"{settings.FRONTEND_URL}/activate/{uid}/{token}"
+            send_activation_email(request, user, uid, token)
             
             return Response({
                 "token": token,
@@ -200,10 +196,9 @@ class ResetPasswordView(APIView):
             user = User.objects.get(email=email)
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = default_token_generator.make_token(user)
-            reset_link = f"http://127.0.0.1:8000/password_confirm/{uid}/{token}/"
+            send_password_reset_email(user, uid, token)
             return Response({
                 "detail": "An email has been sent to reset your password.",
-                "reset_link": reset_link
             }, status=status.HTTP_200_OK)
         else:
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
