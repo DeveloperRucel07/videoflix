@@ -3,18 +3,19 @@ from videoflix_app.models import Video
 
 
 class VideoSerializer(serializers.ModelSerializer):
+    thumbnail_url = serializers.SerializerMethodField()
     class Meta:
         model = Video
         fields = [
             'id',
-            'created_at',
             'title',
             'description',
-            'thumbnail_url',
             'category',
+            'thumbnail_url',
+            'created_at',
         ]
 
-    def get_thumbnail_as_img(self, obj):
+    def get_thumbnail_url(self, obj):
         if obj.thumbnail_url:
-            return obj.thumbnail_url.url.replace('.png', '.jpg')
+            return obj.thumbnail_url.url
         return None

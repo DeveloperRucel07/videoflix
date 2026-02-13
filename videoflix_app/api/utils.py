@@ -5,18 +5,45 @@ from pathlib import Path
 from videoflix_app.models import Video 
 
 
-def convert_to_hls(video_id, video_path, resolution):
-    output_dir = os.path.join(settings.MEDIA_ROOT, 'hls', str(video_id), f"{resolution}p")
-    os.makedirs(output_dir, exist_ok=True)
-    
-    output_path = os.path.join(output_dir, "index.m3u8")
-    
-    cmd = (
-        f"ffmpeg -i {video_path} -vf scale=-2:{resolution} "
-        f"-start_number 0 -hls_time 10 -hls_list_size 0 -f hls {output_path}"
-    )
-    subprocess.run(cmd, shell=True, check=True)
+def create_video_thumbnail(video_id):
+    """
+    Generates a visually representative thumbnail using ffmpeg's thumbnail filter.
+    Avoids black frames automatically.
+    """
+    try:
+        video = Video.objects.get(pk=video_id)
+        source_path = video.video_file.path
+    except Video.DoesNotExist:
+        print(f"❌ Video {video_id} not found.")
+        return
 
+    thumbnail_dir = Path(settings.MEDIA_ROOT) / "thumbnail"
+    thumbnail_dir.mkdir(parents=True, exist_ok=True)
+
+    thumbnail_path = thumbnail_dir / f"{video_id}.jpg"
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i", source_path,
+        "-vf", "thumbnail,scale=1280:-1",  # auto-select good frame + resize
+        "-frames:v", "1",
+        "-q:v", "2",
+        str(thumbnail_path),
+    ]
+
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        relative_path = f"thumbnail/{video_id}.jpg"
+        Video.objects.filter(pk=video_id).update(
+            thumbnail_url=relative_path
+        )
+        print(f"✅ Smart thumbnail created for video {video_id} at {thumbnail_path}")
+        print(f"Thumbnail URL: {relative_path}")
+
+    except subprocess.CalledProcessError as e:
+        print("❌ Thumbnail creation failed:")
+        print(e.stderr)
 
 
 def convert_video_to_hls(video_id):
@@ -30,7 +57,6 @@ def convert_video_to_hls(video_id):
     base_output_dir = Path(settings.MEDIA_ROOT) / "hls" / str(video_id)
     base_output_dir.mkdir(parents=True, exist_ok=True)
 
-    # name, width, bitrate, maxrate, bufsize
     renditions = [
         ("480p", 854, "1400k", "1500k", "2100k"),
         ("720p", 1280, "2800k", "3000k", "4200k"),
@@ -47,15 +73,12 @@ def convert_video_to_hls(video_id):
         "-filter_complex"
     ]
 
-    # Build scaling filters
     for idx, (name, width, *_ ) in enumerate(renditions):
         filter_parts.append(
             f"[0:v]scale=w={width}:h=-2[v{idx}]"
         )
 
     cmd.append("; ".join(filter_parts))
-
-    # Map each resolution
     for idx, (name, _, bitrate, maxrate, bufsize) in enumerate(renditions):
         (base_output_dir / name).mkdir(exist_ok=True)
 
@@ -107,11 +130,8 @@ def convert_and_save(video_id):
     """
     try:
         video = Video.objects.get(id=video_id)
+        create_video_thumbnail(video_id)
         convert_video_to_hls(video_id)
-        source_path = video.video_file.path
-        resolutions = [480, 720, 1080]
-        # for resolution in resolutions:
-        #     convert_to_hls(video_id, source_path, resolution)
         video.conversion_status = 'completed'
         video.error_message = ''
     except Exception as e:
