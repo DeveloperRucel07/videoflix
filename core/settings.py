@@ -169,16 +169,18 @@ STATIC_ROOT = BASE_DIR / "static"
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+VIDEO_URL = "/video/"
+VIDEO_ROOT = BASE_DIR / "video"
 
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
-
-EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+# EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = os.getenv("EMAIL_HOST", default="mailhog")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", default=1025))
-EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", default="False").lower() == "false"
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", default="False")
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", default="admin@gmail.com")
-EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", default="securepassword")
+EMAIL_HOST_PASSWORD = str(os.getenv("EMAIL_HOST_PASSWORD", default="securepassword"))
 
 
 

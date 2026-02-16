@@ -26,7 +26,7 @@ def create_video_thumbnail(video_id):
         "ffmpeg",
         "-y",
         "-i", source_path,
-        "-vf", "thumbnail,scale=1280:-1",  # auto-select good frame + resize
+        "-vf", "thumbnail,scale=1280:-1",
         "-frames:v", "1",
         "-q:v", "2",
         str(thumbnail_path),
@@ -54,7 +54,7 @@ def convert_video_to_hls(video_id):
         print(f"Video {video_id} not found.")
         return
 
-    base_output_dir = Path(settings.MEDIA_ROOT) / "hls" / str(video_id)
+    base_output_dir = Path(settings.VIDEO_ROOT) / str(video_id)
     base_output_dir.mkdir(parents=True, exist_ok=True)
 
     renditions = [
