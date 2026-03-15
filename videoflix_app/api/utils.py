@@ -5,57 +5,57 @@ from pathlib import Path
 from videoflix_app.models import Video 
 
 
+
+import subprocess
+import logging
+from pathlib import Path
+from django.conf import settings
+from videoflix_app.models import Video
+
+logger = logging.getLogger(__name__)
+
+
 def create_video_thumbnail(video_id):
     """
-    Generates a visually representative thumbnail using ffmpeg's thumbnail filter.
-    Avoids black frames automatically.
+        Generates a visually representative thumbnail using ffmpeg's thumbnail filter.
+        Avoids black frames automatically.
     """
     try:
         video = Video.objects.get(pk=video_id)
-        source_path = video.video_file.path
     except Video.DoesNotExist:
-        print(f"❌ Video {video_id} not found.")
+        logger.warning("Video %s not found while creating thumbnail.", video_id)
         return
 
-    thumbnail_dir = Path(settings.MEDIA_ROOT) / "thumbnail"
-    thumbnail_dir.mkdir(parents=True, exist_ok=True)
-
-    thumbnail_path = thumbnail_dir / f"{video_id}.jpg"
+    thumb_dir = Path(settings.MEDIA_ROOT) / "thumbnail"
+    thumb_dir.mkdir(parents=True, exist_ok=True)
+    thumb_path = thumb_dir / f"{video_id}.jpg"
 
     cmd = [
-        "ffmpeg",
-        "-y",
-        "-i", source_path,
+        "ffmpeg", "-y", "-i", video.video_file.path,
         "-vf", "thumbnail,scale=1280:-1",
-        "-frames:v", "1",
-        "-q:v", "2",
-        str(thumbnail_path),
+        "-frames:v", "1", "-q:v", "2",
+        str(thumb_path)
     ]
 
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
-        relative_path = f"thumbnail/{video_id}.jpg"
-        Video.objects.filter(pk=video_id).update(
-            thumbnail_url=relative_path
-        )
-        print(f"✅ Smart thumbnail created for video {video_id} at {thumbnail_path}")
-        print(f"Thumbnail URL: {relative_path}")
+        video.thumbnail_url = f"thumbnail/{video_id}.jpg"
+        video.save(update_fields=["thumbnail_url"])
+        logger.info("Thumbnail created for video %s at %s", video_id, thumb_path)
 
     except subprocess.CalledProcessError as e:
-        print("❌ Thumbnail creation failed:")
-        print(e.stderr)
+        logger.error("Thumbnail creation failed for video %s: %s", video_id, e.stderr)
 
 
 def convert_video_to_hls(video_id):
     try:
         video = Video.objects.get(pk=video_id)
-        source_path = video.video_file.path
     except Video.DoesNotExist:
-        print(f"Video {video_id} not found.")
+        logger.warning("Video %s not found for HLS conversion.", video_id)
         return
 
-    base_output_dir = Path(settings.VIDEO_ROOT) / str(video_id)
-    base_output_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(settings.VIDEO_ROOT) / str(video_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     renditions = [
         ("480p", 854, "1400k", "1500k", "2100k"),
@@ -63,64 +63,43 @@ def convert_video_to_hls(video_id):
         ("1080p", 1920, "5000k", "5500k", "7500k"),
     ]
 
-    filter_parts = []
-    var_stream_map = []
+    filters, stream_map = [], []
+    cmd = ["ffmpeg", "-y", "-i", video.video_file.path, "-filter_complex"]
 
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i", source_path,
-        "-filter_complex"
-    ]
+    for i, (name, w, *_ ) in enumerate(renditions):
+        filters.append(f"[0:v]scale=w={w}:h=-2[v{i}]")
 
-    for idx, (name, width, *_ ) in enumerate(renditions):
-        filter_parts.append(
-            f"[0:v]scale=w={width}:h=-2[v{idx}]"
-        )
+    cmd.append(";".join(filters))
 
-    cmd.append("; ".join(filter_parts))
-    for idx, (name, _, bitrate, maxrate, bufsize) in enumerate(renditions):
-        (base_output_dir / name).mkdir(exist_ok=True)
+    for i, (name, _, br, mr, buf) in enumerate(renditions):
+        (out_dir / name).mkdir(exist_ok=True)
+        cmd += [
+            "-map", f"[v{i}]", "-map", "0:a",
+            f"-b:v:{i}", br, f"-maxrate:v:{i}", mr, f"-bufsize:v:{i}", buf
+        ]
+        stream_map.append(f"v:{i},a:{i},name:{name}")
 
-        cmd.extend([
-            "-map", f"[v{idx}]",
-            "-map", "0:a",
-            f"-b:v:{idx}", bitrate,
-            f"-maxrate:v:{idx}", maxrate,
-            f"-bufsize:v:{idx}", bufsize,
-        ])
-
-        var_stream_map.append(f"v:{idx},a:{idx},name:{name}")
-
-    cmd.extend([
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "23",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-g", "48",
-        "-keyint_min", "48",
-        "-sc_threshold", "0",
-        "-f", "hls",
-        "-hls_time", "6",
-        "-hls_playlist_type", "vod",
-        "-hls_segment_filename",
-        str(base_output_dir / "%v" / "%03d.ts"),
+    cmd += [
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+        "-c:a", "aac", "-b:a", "128k",
+        "-g", "48", "-keyint_min", "48", "-sc_threshold", "0",
+        "-f", "hls", "-hls_time", "6", "-hls_playlist_type", "vod",
+        "-hls_segment_filename", str(out_dir / "%v/%03d.ts"),
         "-master_pl_name", "index.m3u8",
-        "-var_stream_map", " ".join(var_stream_map),
-        str(base_output_dir / "%v" / "index.m3u8"),
-    ])
+        "-var_stream_map", " ".join(stream_map),
+        str(out_dir / "%v/index.m3u8"),
+    ]
 
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
-        print(f" HLS conversion finished for video {video_id}")
-    except subprocess.CalledProcessError as e:
-        print("HLS conversion failed:")
-        print(e.stderr)
+        logger.info("HLS conversion finished for video %s", video_id)
 
+    except subprocess.CalledProcessError as e:
+        logger.error("HLS conversion failed for video %s: %s", video_id, e.stderr)
 
 
 def convert_and_save(video_id):
+
     """ 
         convert_and_save is a helper function that retrieves the video by its ID, 
         converts it to HLS format using the convert_to_hls function, and updates the conversion status in the database. 
@@ -128,19 +107,29 @@ def convert_and_save(video_id):
         Args:
             video_id (int): The ID of the video to be converted and saved.
     """
+    video = Video.objects.filter(id=video_id).first()
+
+    if not video:
+        logger.warning("convert_and_save called with non-existent video %s", video_id)
+        return
+
     try:
-        video = Video.objects.get(id=video_id)
+        logger.info("Starting processing pipeline for video %s", video_id)
+
         create_video_thumbnail(video_id)
         convert_video_to_hls(video_id)
-        video.conversion_status = 'completed'
-        video.error_message = ''
+
+        video.conversion_status = "completed"
+        video.error_message = ""
+
+        logger.info("Processing completed for video %s", video_id)
+
     except Exception as e:
-        video = Video.objects.filter(id=video_id).first()
-        if video:
-            video.conversion_status = 'failed'
-            video.error_message = str(e)
+        video.conversion_status = "failed"
+        video.error_message = str(e)
+
+        logger.exception("Processing failed for video %s", video_id)
+
     finally:
-        if video:
-            video.save()
-    
+        video.save()
 
