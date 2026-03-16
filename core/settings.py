@@ -34,8 +34,15 @@ INTERNAL_IPS = [
 ]
 
 CORS_ALLOWED_ORIGINS = [
+    "https://videoflix.rucel-tsafack.com",
     "http://127.0.0.1:5500",
     "http://localhost:5500",
+]
+
+CORS_ALLOW_HEADERS = [
+    "authorization",
+    "content-type",
+    "x-csrftoken",
 ]
 
 FRONTEND_URL = os.environ.get("FRONTEND_URL", default="http://127.0.0.1:5500")

@@ -33,7 +33,6 @@ class RegistrationView(APIView):
             user = serializer.create(serializer.validated_data)
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = default_token_generator.make_token(user)
-            # activation_link = f"{settings.FRONTEND_URL}/activate/{uid}/{token}"
             send_activation_email(request, user, uid, token)
             
             return Response({
