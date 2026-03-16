@@ -5,7 +5,6 @@ from django.conf import settings
 
 
 def send_activation_email(request, user, uid, token):
-    # f"https://videoflix.rucel-tsafack.com/pages/auth/activate.html?uid={uid}&token={token}"
     activation_link = f"{settings.FRONTEND_URL}/pages/auth/activate.html?uid={uid}&token={token}"
     subject = "Activate Videoflix account"
     body = f"Hi {user.email},\n\nPlease click the link below to activate your Videoflix account:\n{activation_link}\n\nIf you did not register for an account, please ignore this email.\n\nBest regards,\nVideoflix Team"

@@ -16,6 +16,11 @@ class VideoSerializer(serializers.ModelSerializer):
         ]
 
     def get_thumbnail_url(self, obj):
-        if obj.thumbnail_url:
-            return obj.thumbnail_url.url
-        return None
+        """
+            Dynamically build thumbnail URL based on video ID
+        """
+        request = self.context.get('request')
+        path = f"/media/thumbnail/{obj.id}.jpg"
+        if request:
+            return request.build_absolute_uri(path)
+        return path
