@@ -9,6 +9,26 @@ logger = logging.getLogger(__name__)
 
 
 def _get_resolution(path):
+    """
+        Extract the resolution (width and height) of a video file using ffprobe.
+
+        This function executes an FFmpeg probe command to inspect the first video
+        stream (`v:0`) of the given file and returns its width and height. The
+        output is parsed from JSON into Python data.
+
+        Args:
+            path (str or Path): Filesystem path to the video file.
+
+        Returns:
+            tuple[int, int]: A tuple containing (width, height) of the video.
+
+        Raises:
+            ValueError:
+                - If no video stream is found in the file
+                - If the extracted width or height is missing or invalid
+    """
+
+
     cmd = [
         "ffprobe", "-v", "error",
         "-select_streams", "v:0",
@@ -56,154 +76,67 @@ def create_video_thumbnail(video_id):
         logger.error("Thumbnail creation failed for video %s: %s", video_id, e.stderr)
 
 
-# def convert_video_to_hls(video_id):
-#     try:
-#         video = Video.objects.get(pk=video_id)
-#     except Video.DoesNotExist:
-#         logger.warning("Video %s not found for HLS conversion.", video_id)
-#         return
-
-#     out_dir = Path(settings.VIDEO_ROOT) / str(video_id)
-#     out_dir.mkdir(parents=True, exist_ok=True)
-
-#     renditions = [
-#         ("480p", 854, "1400k", "1500k", "2100k"),
-#         ("720p", 1280, "2800k", "3000k", "4200k"),
-#         ("1080p", 1920, "5000k", "5500k", "7500k"),
-#     ]
-
-#     filters, stream_map = [], []
-#     cmd = ["ffmpeg", "-y", "-i", video.video_file.path, "-filter_complex"]
-
-#     for i, (name, w, *_ ) in enumerate(renditions):
-#         filters.append(f"[0:v]scale=w='min({w},iw)':h=-2[v{i}]")
-
-#     cmd.append(";".join(filters))
-
-#     for i, (name, _, br, mr, buf) in enumerate(renditions):
-#         (out_dir / name).mkdir(exist_ok=True)
-#         cmd += [
-#             "-map", f"[v{i}]", "-map", "0:a",
-#             f"-b:v:{i}", br, f"-maxrate:v:{i}", mr, f"-bufsize:v:{i}", buf
-#         ]
-#         stream_map.append(f"v:{i},a:{i},name:{name}")
-
-#     cmd += [
-#         "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-#         "-c:a", "aac", "-b:a", "128k",
-#         "-g", "48", "-keyint_min", "48", "-sc_threshold", "0",
-#         "-f", "hls", "-hls_time", "6", "-hls_playlist_type", "vod",
-#         "-hls_segment_filename", str(out_dir / "%v/%03d.ts"),
-#         "-master_pl_name", "index.m3u8",
-#         "-var_stream_map", " ".join(stream_map),
-#         str(out_dir / "%v/index.m3u8"),
-#     ]
-
-#     try:
-#         subprocess.run(cmd, check=True, capture_output=True, text=True)
-#         logger.info("HLS conversion finished for video %s", video_id)
-
-#     except subprocess.CalledProcessError as e:
-#         logger.error("HLS conversion failed for video %s: %s", video_id, e.stderr)
-
-#     try:
-#         video = Video.objects.get(pk=video_id)
-#     except Video.DoesNotExist:
-#         logger.warning("Video %s not found for HLS conversion.", video_id)
-#         return
-
-#     out_dir = Path(settings.VIDEO_ROOT) / str(video_id)
-#     out_dir.mkdir(parents=True, exist_ok=True)
-
-#     manifest_path = out_dir / "index.m3u8"
-#     segment_pattern = out_dir / "%03d.ts"
-
-#     cmd = [
-#         "ffmpeg",
-#         "-y",
-#         "-i", video.video_file.path,
-
-#         # Video encoding
-#         "-c:v", "libx264",
-#         "-preset", "veryfast",
-#         "-crf", "23",
-
-#         # Audio encoding
-#         "-c:a", "aac",
-#         "-b:a", "128k",
-
-#         # HLS settings
-#         "-f", "hls",
-#         "-hls_time", "6",
-#         "-hls_playlist_type", "vod",
-#         "-hls_segment_filename", str(segment_pattern),
-
-#         str(manifest_path),
-#     ]
-
-#     try:
-#         subprocess.run(cmd, check=True, capture_output=True, text=True)
-#         logger.info("HLS (single bitrate) conversion finished for video %s", video_id)
-
-#     except subprocess.CalledProcessError as e:
-#         logger.error("HLS conversion failed for video %s: %s", video_id, e.stderr)
-
 def convert_video_to_hls(video_id):
+
+    """
+    Convert a video file into HLS (HTTP Live Streaming) format.
+
+    This function retrieves a video from the database, validates its resolution,
+    and uses FFmpeg to generate a single-bitrate HLS stream. The output consists
+    of an `.m3u8` playlist file and multiple `.ts` segment files, which can be
+    served for streaming.
+
+    The conversion uses CRF-based encoding for adaptive quality and does not
+    perform scaling or multiple renditions, ensuring compatibility with all
+    video sizes.
+
+    Args:
+        video_id (int): The primary key of the Video instance to convert.
+
+    Raises:
+        ValueError: If the video has an invalid or too small resolution.
+        subprocess.CalledProcessError: If the FFmpeg process fails.
+    """
     video = Video.objects.filter(pk=video_id).first()
     if not video:
         logger.warning("Video %s not found.", video_id)
         return
-    width, _ = _get_resolution(video.video_file.path)
-    if width < 240:
-        raise ValueError(f"Video too small for HLS ({width}px width)")
+
+    width, height = _get_resolution(video.video_file.path)
+    if not width or not height or width < 240:
+        raise ValueError(f"Invalid video resolution: {width}x{height}")
 
     out_dir = Path(settings.VIDEO_ROOT) / str(video_id)
     out_dir.mkdir(parents=True, exist_ok=True)
-
-    renditions = [
-        ("480p", 854, "1400k", "1500k", "2100k"),
-        ("720p", 1280, "2800k", "3000k", "4200k"),
-        ("1080p", 1920, "5000k", "5500k", "7500k"),
-    ]
-
-    renditions = [r for r in renditions if r[1] <= width]
-    if not renditions:
-        raise ValueError("No valid renditions for this video")
-
-    filters = ";".join(
-        f"[0:v]scale=w='min({w},iw)':h=-2[v{i}]"
-        for i, (_, w, *_ ) in enumerate(renditions)
-    )
-
-    stream_map = " ".join(f"v:{i},a:{i},name:{name}" for i, (name, *_ ) in enumerate(renditions))
+    manifest = out_dir / "index.m3u8"
+    segments = out_dir / "%03d.ts"
 
     cmd = [
-        "ffmpeg", "-y", "-i", video.video_file.path,
-        "-filter_complex", filters,
-        *sum([
-            [
-                "-map", f"[v{i}]", "-map", "0:a",
-                f"-b:v:{i}", br, f"-maxrate:v:{i}", mr, f"-bufsize:v:{i}", buf
-            ]
-            for i, (_, _, br, mr, buf) in enumerate(renditions)
-        ], []),
+        "ffmpeg",
+        "-y",
+        "-i", video.video_file.path,
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "23",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-g", "48",
+        "-keyint_min", "48",
+        "-sc_threshold", "0",
 
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-        "-c:a", "aac", "-b:a", "128k",
-        "-g", "48", "-keyint_min", "48", "-sc_threshold", "0",
-        "-f", "hls", "-hls_time", "6", "-hls_playlist_type", "vod",
-        "-hls_segment_filename", str(out_dir / "%v/%03d.ts"),
-        "-master_pl_name", "index.m3u8",
-        "-var_stream_map", stream_map,
-        str(out_dir / "%v/index.m3u8"),
+        "-f", "hls",
+        "-hls_time", "6",
+        "-hls_playlist_type", "vod",
+        "-hls_segment_filename", str(segments),
+        str(manifest),
     ]
 
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
-        logger.info("HLS conversion finished for video %s", video_id)
+        logger.info("HLS conversion (single bitrate) finished for video %s", video_id)
+
     except subprocess.CalledProcessError as e:
         logger.error("HLS conversion failed for video %s: %s", video_id, e.stderr)
-
 
 def convert_and_save(video_id):
 
